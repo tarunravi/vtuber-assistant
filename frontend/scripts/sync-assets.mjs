@@ -1,22 +1,29 @@
 import { readFile, rm, mkdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import fse from 'fs-extra'
 
-const rootConfigPath = '/Users/tarun/Anime/vtuber/vtuber.config.json'
-const frontendPublicDir = '/Users/tarun/Anime/vtuber/frontend/public'
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+// Use script location to find project root - more reliable in Docker
+const scriptDir = __dirname
+const projectRoot = join(scriptDir, '..', '..') // Go up from scripts/frontend to project root
+const rootConfigPath = join(projectRoot, 'vtuber.config.json')
+const frontendPublicDir = join(projectRoot, 'frontend/public')
 
 const modelMap = {
   mao: {
-    src: '/Users/tarun/Anime/vtuber/assets/models/mao_pro/runtime',
+    src: join(projectRoot, 'assets/models/mao_pro/runtime'),
     entry: 'mao_pro.model3.json'
   },
   shizuku: {
-    src: '/Users/tarun/Anime/vtuber/assets/models/shizuku/runtime',
+    src: join(projectRoot, 'assets/models/shizuku/runtime'),
     entry: 'shizuku.model3.json'
   },
   ellot: {
-    src: '/Users/tarun/Anime/vtuber/assets/models/ellot/runtime',
+    src: join(projectRoot, 'assets/models/ellot/runtime'),
     entry: 'ellot.model3.json'
   }
 }
@@ -31,6 +38,11 @@ async function main() {
   const emotions = perModel.emotions && typeof perModel.emotions === 'object' ? perModel.emotions : {}
   const { src, entry } = modelMap[selected]
 
+  // Check if the source directory exists
+  if (!existsSync(src)) {
+    throw new Error(`Could not find model assets for ${selected} at path: ${src}\nWorking directory: ${projectRoot}`)
+  }
+
   const modelOutDir = join(frontendPublicDir, 'model')
   if (existsSync(modelOutDir)) await rm(modelOutDir, { recursive: true, force: true })
   await mkdir(modelOutDir, { recursive: true })
@@ -38,11 +50,21 @@ async function main() {
 
   const llm = rootConfig.llm || {}
   const wsPath = typeof llm.wsPath === 'string' ? llm.wsPath : '/ws'
-  const backendWsUrl = `ws://127.0.0.1:8000${wsPath}`
+  // Support proxying through the frontend dev server so only port 5173 is exposed
+  const useProxy = String(process.env.FRONTEND_PROXY || '').toLowerCase() === '1' || String(process.env.FRONTEND_PROXY || '').toLowerCase() === 'true'
+  let backendWsUrl
+  if (useProxy) {
+    // Relative path lets Vite proxy handle WS to backend
+    backendWsUrl = wsPath
+  } else {
+    // Use environment variables for Docker compatibility
+    const backendHost = process.env.BACKEND_HOST || '127.0.0.1'
+    const backendPort = process.env.BACKEND_PORT || '8000'
+    backendWsUrl = `ws://${backendHost}:${backendPort}${wsPath}`
+  }
 
   const appConfig = { model: selected, entry: `/model/${entry}`, timeScale, emotions, llm: { backendWsUrl } }
   await writeFile(join(frontendPublicDir, 'app-config.json'), JSON.stringify(appConfig))
 }
 
 main()
-

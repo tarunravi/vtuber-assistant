@@ -60,9 +60,7 @@ This app adds a lightweight LLM chat on top of the Live2D renderer. The architec
 
 ### Running Locally
 - Single command from repo root:
-  ```bash
-  /Users/tarun/Anime/start.sh
-  ```
+  - `./start.sh` (from project root)
   - Starts backend (FastAPI on `127.0.0.1:8000`) and frontend (Vite dev server).
 
 - Requirements:

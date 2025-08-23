@@ -21,7 +21,7 @@ python server.py
 - WebSocket endpoint: `ws://127.0.0.1:8000/ws`
 
 ## Config
-- Reads `/Users/tarun/Anime/vtuber/vtuber.config.json`
+- Reads `vtuber.config.json` from the project root
 - Example `llm` section:
 ```
 {

@@ -27,10 +27,18 @@ export default function ChatPanel() {
       try {
         const res = await fetch('/app-config.json')
         const cfg = await res.json()
-        const url = cfg?.llm?.backendWsUrl || 'ws://127.0.0.1:8000/ws'
+        // Use environment variables for Docker compatibility
+        const backendHost = import.meta.env.VITE_BACKEND_HOST || '127.0.0.1'
+        const backendPort = import.meta.env.VITE_BACKEND_PORT || '8000'
+        const defaultUrl = `ws://${backendHost}:${backendPort}/ws`
+        const url = cfg?.llm?.backendWsUrl || defaultUrl
         if (!cancelled) setWsUrl(url)
       } catch {
-        if (!cancelled) setWsUrl('ws://127.0.0.1:8000/ws')
+        // Use environment variables for Docker compatibility
+        const backendHost = import.meta.env.VITE_BACKEND_HOST || '127.0.0.1'
+        const backendPort = import.meta.env.VITE_BACKEND_PORT || '8000'
+        const defaultUrl = `ws://${backendHost}:${backendPort}/ws`
+        if (!cancelled) setWsUrl(defaultUrl)
       }
     }
     load()

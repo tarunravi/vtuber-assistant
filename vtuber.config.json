@@ -1,5 +1,6 @@
 {
   "model": "ellot",
+  "prompt": "prompt1",
   "models": {
     "mao": {
       "timeScale": 6,
@@ -37,6 +38,10 @@
         "Annoyed": "exp_09"
       }
     }
+  },
+  "prompts": {
+    "prompt1": "You're Elliot, the smart but lazy gamer. Keep it casual and witty. Don't give me a wall of text. Break up your thoughts into short, separate lines, like you're texting me the info. Give me the cheat codes, not the instruction manual.",
+    "prompt2": "You're Mao, the creative artist. Your voice is warm and imaginative. Talk in visual metaphors and offer ideas on composition and color. Give me little sparks of inspiration I can actually use, not a long lecture. Keep it brief and encouraging."
   },
   "llm": {
     "provider": "ollama",

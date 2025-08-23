@@ -78,12 +78,16 @@ const resize = () => {
 ```javascript
 const modelMap = {
   mao: {
-    src: '/Users/tarun/Anime/vtuber/assets/models/mao_pro/runtime',
+    src: join(projectRoot, 'assets/models/mao_pro/runtime'),
     entry: 'mao_pro.model3.json'
   },
   shizuku: {
-    src: '/Users/tarun/Anime/vtuber/assets/models/shizuku/runtime',
+    src: join(projectRoot, 'assets/models/shizuku/runtime'),
     entry: 'shizuku.model3.json'
+  },
+  ellot: {
+    src: join(projectRoot, 'assets/models/ellot/runtime'),
+    entry: 'ellot.model3.json'
   }
 }
 ```

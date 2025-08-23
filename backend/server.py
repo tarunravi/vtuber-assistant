@@ -1,5 +1,7 @@
 import json
 from typing import AsyncGenerator
+import os
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -7,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
 
-ROOT_CONFIG_PATH = "/Users/tarun/Anime/vtuber/vtuber.config.json"
+# Use relative path that works in Docker containers
+ROOT_CONFIG_PATH = "vtuber.config.json"
 
 
 def load_llm_config():
@@ -107,7 +110,9 @@ app.add_api_websocket_route(WS_PATH, ws_chat)
 
 
 if __name__ == "__main__":
-    # Default dev server bind
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=False)
+    # Use environment variables for Docker compatibility
+    host = os.getenv("UVICORN_HOST", "127.0.0.1")
+    port = int(os.getenv("UVICORN_PORT", "8000"))
+    uvicorn.run("server:app", host=host, port=port, reload=False)
 
 

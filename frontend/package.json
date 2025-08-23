@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/sync-assets.mjs && vite",
+    "dev": "vite",
     "build": "node scripts/sync-assets.mjs && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

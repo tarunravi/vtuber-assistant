@@ -1,0 +1,23 @@
+services:
+  vtuber:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vtuber:dev
+    working_dir: /app
+    environment:
+      # Backend runs in the same container; bind only internally
+      UVICORN_HOST: "0.0.0.0"
+      UVICORN_PORT: "8000"
+      # FRONTEND_PROXY ensures the app uses relative WS path and Vite proxy
+      FRONTEND_PROXY: "1"
+      # Keep for scripts that might reference these
+      BACKEND_HOST: "127.0.0.1"
+      BACKEND_PORT: "8000"
+      npm_config_fund: "false"
+      npm_config_audit: "false"
+      FORCE_COLOR: "1"
+    command: bash -c "chmod +x start.sh && ./start.sh"
+    ports:
+      - "5173:5173"
+
