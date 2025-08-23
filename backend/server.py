@@ -2,15 +2,18 @@ import json
 from typing import AsyncGenerator
 import os
 from pathlib import Path
+import re
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
+from prompt_factory import PromptFactory
+from llm_client import LLMClient
 
 
-# Use relative path that works in Docker containers
-ROOT_CONFIG_PATH = "vtuber.config.json"
+# Resolve project root config regardless of CWD (works for local and Docker)
+ROOT_CONFIG_PATH = str((Path(__file__).resolve().parent.parent / "vtuber.config.json").resolve())
 
 
 def load_llm_config():
@@ -19,16 +22,37 @@ def load_llm_config():
             cfg = json.load(f)
     except Exception:
         cfg = {}
+
+    # LLM settings
     llm = cfg.get("llm", {}) or {}
     provider = llm.get("provider", "ollama")
     model = llm.get("model", "qwen2.5")
-    host = llm.get("host", "http://127.0.0.1:11434")
+    # Allow overriding host via environment so containers can call host services
+    host = os.getenv("LLM_HOST") or os.getenv("OLLAMA_HOST") or llm.get("host", "http://127.0.0.1:11434")
     ws_path = llm.get("wsPath", "/ws")
+
+    # Persona and emotions
+    selected_model_key = (cfg.get("model") or "").strip()
+    selected_prompt_key = (cfg.get("prompt") or "").strip()
+    prompts = cfg.get("prompts", {}) or {}
+    models_cfg = cfg.get("models", {}) or {}
+    persona_prompt = (prompts.get(selected_prompt_key) or "").strip()
+    emotion_names = []
+    try:
+        model_entry = models_cfg.get(selected_model_key) or {}
+        emotions_map = model_entry.get("emotions", {}) or {}
+        # Keep the order as defined in JSON keys iteration (Python 3.7+ preserves insertion order)
+        emotion_names = [name for name in emotions_map.keys() if isinstance(name, str) and name.strip()]
+    except Exception:
+        emotion_names = []
+
     return {
         "provider": provider,
         "model": model,
         "host": host.rstrip("/"),
         "ws_path": ws_path,
+        "persona_prompt": persona_prompt,
+        "emotion_names": emotion_names,
     }
 
 
@@ -63,9 +87,10 @@ app.add_middleware(
 )
 
 
-# Configure WebSocket route based on config
+# Configure WebSocket route and prompt factory based on config
 CFG = load_llm_config()
 WS_PATH = CFG["ws_path"] if CFG.get("ws_path") else "/ws"
+prompt_factory = PromptFactory(CFG.get("persona_prompt", ""), CFG.get("emotion_names", []))
 
 async def ws_chat(websocket: WebSocket):
     await websocket.accept()
@@ -73,6 +98,14 @@ async def ws_chat(websocket: WebSocket):
     provider = cfg["provider"]
     model = cfg["model"]
     host = cfg["host"]
+    allowed_emotions = cfg.get("emotion_names", [])
+    llm = LLMClient(
+        host=host,
+        model=model,
+        provider=provider,
+        allowed_emotions=allowed_emotions,
+        prompt_factory=prompt_factory,
+    )
 
     async with httpx.AsyncClient() as client:
         try:
@@ -91,7 +124,7 @@ async def ws_chat(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "start"}))
 
                 if provider == "ollama":
-                    async for token in stream_ollama(client, host, model, user_text):
+                    async for token in llm.stream(user_text):
                         await websocket.send_text(json.dumps({"type": "chunk", "data": token}))
                 else:
                     await websocket.send_text(json.dumps({"type": "error", "message": f"Unsupported provider: {provider}"}))

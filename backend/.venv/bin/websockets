@@ -1,4 +1,4 @@
-#!/app/backend/.venv/bin/python3
+#!/Users/tarun/Anime/backend/.venv/bin/python3
 import sys
 from websockets.cli import main
 if __name__ == '__main__':

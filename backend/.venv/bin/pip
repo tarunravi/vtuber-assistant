@@ -1,4 +1,4 @@
-#!/app/backend/.venv/bin/python3
+#!/Users/tarun/Anime/backend/.venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

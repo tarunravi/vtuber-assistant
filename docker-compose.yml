@@ -1,23 +1,18 @@
 services:
-  vtuber:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: vtuber:dev
-    working_dir: /app
-    environment:
-      # Backend runs in the same container; bind only internally
-      UVICORN_HOST: "0.0.0.0"
-      UVICORN_PORT: "8000"
-      # FRONTEND_PROXY ensures the app uses relative WS path and Vite proxy
-      FRONTEND_PROXY: "1"
-      # Keep for scripts that might reference these
-      BACKEND_HOST: "127.0.0.1"
-      BACKEND_PORT: "8000"
-      npm_config_fund: "false"
-      npm_config_audit: "false"
-      FORCE_COLOR: "1"
-    command: bash -c "chmod +x start.sh && ./start.sh"
+  app:
+    build: .
+    container_name: anime-vtuber
     ports:
-      - "5173:5173"
+      - "5173:5173"   # Vite frontend
+    environment:
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=8000
+      - BACKEND_PORT=8000
+      - FRONTEND_PROXY=1
+      # Allow backend in container to reach host Ollama
+      - LLM_HOST=http://host.docker.internal:11434
+    # Ensure Vite uses correct host inside container
+    working_dir: /app
+    command: sh -c "node frontend/scripts/sync-assets.mjs && (python3 backend/server.py &) && npm --prefix frontend run dev"
+
 

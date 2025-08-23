@@ -2,7 +2,6 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-# Use absolute paths that work in Docker containers
 BACKEND_DIR="$SCRIPT_DIR/backend"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
 
@@ -17,9 +16,9 @@ start_backend() {
   fi
   # shellcheck disable=SC1091
   source .venv/bin/activate
-  python -m pip install --upgrade pip >/dev/null 2>&1 || true
-  python -m pip install -r requirements.txt
-  python server.py
+  python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
+  python3 -m pip install -r requirements.txt
+  python3 server.py
 }
 
 start_frontend() {
@@ -27,9 +26,9 @@ start_frontend() {
   
   # Prepare and install dependencies first
   cd "$FRONTEND_DIR"
-  # Clean up node_modules to handle architecture issues in Docker
+  # Clean up node_modules to handle dependency issues
   if [ -d node_modules ]; then
-    log "Cleaning up node_modules for Docker compatibility"
+    log "Cleaning up node_modules"
     rm -rf node_modules package-lock.json
   fi
   
