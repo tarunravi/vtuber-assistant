@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Application, Ticker } from 'pixi.js'
 import { Live2DSprite } from 'easy-live2d'
+import { appEvents } from '../events'
 
 export default function Live2D() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -9,6 +10,10 @@ export default function Live2D() {
   const [expressions, setExpressions] = useState<string[]>([])
   const [selectedExpression, setSelectedExpression] = useState<string>('')
   const [emotionOptions, setEmotionOptions] = useState<{ label: string; value: string }[]>([])
+  const emotionResetTimerRef = useRef<number | null>(null)
+  const defaultEmotionRef = useRef<string>('Happy')
+  const emotionOptionsRef = useRef<{ label: string; value: string }[]>([])
+  const pendingEmotionRef = useRef<string | null>(null)
 
   useEffect(() => {
     let app: Application | null = null
@@ -173,6 +178,11 @@ export default function Live2D() {
           } else {
             setEmotionOptions(opts)
           }
+          // Determine default emotion label
+          const labels = opts.map(o => o.label)
+          if (labels.includes('Happy')) defaultEmotionRef.current = 'Happy'
+          else if (labels.length > 0) defaultEmotionRef.current = labels[0]
+          else defaultEmotionRef.current = 'Happy'
         } catch {
           setEmotionOptions([])
         }
@@ -205,8 +215,90 @@ export default function Live2D() {
       if (resizeHandler) window.removeEventListener('resize', resizeHandler)
       if (app) app.destroy(true)
       if (restoreDateNow) restoreDateNow()
+      if (emotionResetTimerRef.current) {
+        window.clearTimeout(emotionResetTimerRef.current)
+        emotionResetTimerRef.current = null
+      }
     }
   }, [])
+
+  useEffect(() => {
+    emotionOptionsRef.current = emotionOptions
+  }, [emotionOptions])
+
+  useEffect(() => {
+    const applyExpressionByLabel = async (label: string) => {
+      const opts = emotionOptionsRef.current
+      const match = opts.find(o => o.label.toLowerCase() === label.toLowerCase())
+      const exprId = match?.value
+      if (!exprId) return
+      // Try public API
+      try { spriteRef.current?.setExpression({ expressionId: exprId }) } catch {}
+      // Try internals
+      try {
+        const modelAny: any = spriteRef.current
+        const inner = modelAny?._model
+        const exists = inner?._expressions?.getValue?.(exprId)
+        if (exists && inner?._expressionManager?.startMotion) {
+          inner._expressionManager.startMotion(exists, false)
+          return
+        }
+      } catch {}
+      // Lazy-load from file map
+      try {
+        const modelAny: any = spriteRef.current
+        const inner = modelAny?._model
+        const url = exprFileMapRef.current?.[exprId]
+        if (url) {
+          const res = await fetch(url)
+          const buf = await res.arrayBuffer()
+          const loaded = inner?.loadExpression?.(buf, buf.byteLength, exprId)
+          if (loaded) {
+            if (typeof loaded.setFadeInTime === 'function') loaded.setFadeInTime(0.15)
+            if (typeof loaded.setFadeOutTime === 'function') loaded.setFadeOutTime(0.15)
+            inner?._expressions?.setValue?.(exprId, loaded)
+            inner?._expressionManager?.startMotion?.(loaded, false)
+          }
+        }
+      } catch {}
+    }
+
+    const onEmotion = async (evt: Event) => {
+      const detail = (evt as CustomEvent).detail as { label?: string } | undefined
+      const label = (detail?.label || '').trim()
+      if (!label) return
+
+      // If sprite not ready yet, queue the emotion
+      if (!spriteRef.current) {
+        pendingEmotionRef.current = label
+        return
+      }
+
+      await applyExpressionByLabel(label)
+
+      // Reset to default after 5 seconds
+      if (emotionResetTimerRef.current) window.clearTimeout(emotionResetTimerRef.current)
+      emotionResetTimerRef.current = window.setTimeout(async () => {
+        const defLabel = defaultEmotionRef.current
+        await applyExpressionByLabel(defLabel)
+      }, 5000)
+    }
+
+    appEvents.addEventListener('emotion', onEmotion as EventListener)
+    return () => {
+      appEvents.removeEventListener('emotion', onEmotion as EventListener)
+    }
+  }, [])
+
+  useEffect(() => {
+    // If there is a pending emotion and sprite/options are ready, apply it
+    if (pendingEmotionRef.current && spriteRef.current && emotionOptionsRef.current.length > 0) {
+      const label = pendingEmotionRef.current
+      pendingEmotionRef.current = null
+      // Fire a synthetic event to reuse logic
+      appEvents.dispatchEvent(new CustomEvent('emotion', { detail: { label } }))
+    }
+  }, [emotionOptions, spriteRef.current])
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>

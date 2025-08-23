@@ -25,6 +25,7 @@ class PromptFactory:
             parts.append(
                 "In your response, always start with a single emotion tag in square brackets, "
                 f"exactly one of these: [{emotions_line}]. Pick the most relevant emotion for your answer. "
+                "Try to use different emotions in subsequent message if suitable."
                 "Never use any other emotion names and do not invent new ones."
             )
         parts.append(

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { appEvents } from '../events'
 
 type StreamMessage =
   | { type: 'start' }
   | { type: 'chunk'; data: string }
   | { type: 'end' }
   | { type: 'error'; message: string }
+  | { type: 'emotion'; emotion: string }
 
 type ConversationItem = {
   role: 'user' | 'assistant'
@@ -19,6 +21,7 @@ export default function ChatPanel() {
   const [messages, setMessages] = useState<ConversationItem[]>([])
   const [streaming, setStreaming] = useState<boolean>(false)
   const pendingAssistantRef = useRef<string>('')
+  const pendingRawRef = useRef<string>('')
   const transcriptEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -59,11 +62,22 @@ export default function ChatPanel() {
         if (msg.type === 'start') {
           setStreaming(true)
           pendingAssistantRef.current = ''
+          pendingRawRef.current = ''
           setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+          return
+        }
+        if (msg.type === 'emotion') {
+          // Broadcast emotion to Live2D component
+          if (msg.emotion && typeof msg.emotion === 'string') {
+            appEvents.dispatchEvent(new CustomEvent('emotion', { detail: { label: msg.emotion } }))
+            // Keep raw transcript with the tag for debugging
+            pendingRawRef.current += `[${msg.emotion}] `
+          }
           return
         }
         if (msg.type === 'chunk') {
           pendingAssistantRef.current += msg.data
+          pendingRawRef.current += msg.data
           setMessages((prev) => {
             const next = prev.slice()
             for (let i = next.length - 1; i >= 0; i--) {
@@ -78,6 +92,11 @@ export default function ChatPanel() {
         }
         if (msg.type === 'end') {
           setStreaming(false)
+          // Debug: print full raw output with emotion tag intact
+          if (pendingRawRef.current) {
+            // eslint-disable-next-line no-console
+            console.log('[Assistant raw]', pendingRawRef.current)
+          }
           return
         }
         if (msg.type === 'error') {

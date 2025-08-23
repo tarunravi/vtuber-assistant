@@ -124,8 +124,25 @@ async def ws_chat(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "start"}))
 
                 if provider == "ollama":
-                    async for token in llm.stream(user_text):
-                        await websocket.send_text(json.dumps({"type": "chunk", "data": token}))
+                    async for event in llm.stream(user_text):
+                        try:
+                            if isinstance(event, dict):
+                                et = event.get("type")
+                                if et == "emotion":
+                                    await websocket.send_text(json.dumps({"type": "emotion", "emotion": event.get("emotion")}))
+                                elif et == "text":
+                                    data = event.get("data")
+                                    if data:
+                                        await websocket.send_text(json.dumps({"type": "chunk", "data": data}))
+                                else:
+                                    # Fallback: treat unknown dict as chunk
+                                    await websocket.send_text(json.dumps({"type": "chunk", "data": json.dumps(event)}))
+                            else:
+                                # Backward-compatible: raw text
+                                await websocket.send_text(json.dumps({"type": "chunk", "data": str(event)}))
+                        except Exception:
+                            # Do not break the stream on send errors; try to continue
+                            pass
                 else:
                     await websocket.send_text(json.dumps({"type": "error", "message": f"Unsupported provider: {provider}"}))
 

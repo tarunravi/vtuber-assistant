@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Dict, Any
 
 import httpx
 
@@ -72,44 +72,55 @@ class LLMClient:
                     if data.get("done") is True:
                         break
 
-    async def stream(self, user_text: str) -> AsyncGenerator[str, None]:
+    async def stream(self, user_text: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream events from the LLM while parsing the leading [Emotion] tag.
+
+        Yields structured events:
+        - {"type": "emotion", "emotion": str}
+        - {"type": "text", "data": str}
+        """
         final_prompt = self.prompt_factory.build_final_prompt(user_text)
 
         if self.provider != "ollama":
             raise RuntimeError(f"Unsupported provider: {self.provider}")
 
-        first_tag_checked = False
+        emotion_emitted = False
         prefix_buffer = ""
+        allowed_set = set(self.allowed_emotions)
 
         async for raw_token in self._stream_ollama(final_prompt):
             token = self._remove_emojis(raw_token)
-
-            if not first_tag_checked:
+            if not emotion_emitted:
                 prefix_buffer += token
                 # Decide when we have enough to validate the opening tag
                 if "]" in prefix_buffer or "\n" in prefix_buffer or len(prefix_buffer) > 64:
-                    m = re.match(r"^\s*\[([^\[\]]{1,32})\]", prefix_buffer)
+                    m = re.match(r"^\s*\[([^\[\]]{1,32})\]\s*", prefix_buffer)
+                    used_emotion = None
+                    remainder = prefix_buffer
                     if m:
-                        emotion = m.group(1).strip()
-                        if emotion not in set(self.allowed_emotions):
-                            prefix_buffer = re.sub(
-                                r"^\s*\[[^\[\]]{1,32}\]",
-                                f"[{self.default_emotion}]",
-                                prefix_buffer,
-                                count=1,
-                            )
+                        candidate = (m.group(1) or "").strip()
+                        used_emotion = candidate if candidate in allowed_set else self.default_emotion
+                        remainder = prefix_buffer[m.end():]
                     else:
-                        prefix_buffer = f"[{self.default_emotion}] " + prefix_buffer.lstrip()
-                    first_tag_checked = True
-                    yield prefix_buffer
+                        used_emotion = self.default_emotion
+                        remainder = prefix_buffer.lstrip()
+
+                    # Emit emotion event once
+                    yield {"type": "emotion", "emotion": used_emotion}
+                    emotion_emitted = True
                     prefix_buffer = ""
+                    # Emit any leftover text (without the emotion tag)
+                    if remainder:
+                        yield {"type": "text", "data": remainder}
             else:
                 if token:
-                    yield token
+                    yield {"type": "text", "data": token}
 
-        # If stream ended before we validated the first tag, prepend it now
-        if not first_tag_checked and prefix_buffer.strip():
-            safe = f"[{self.default_emotion}] " + prefix_buffer.lstrip()
-            yield self._remove_emojis(safe)
+        # If stream ended before we emitted the emotion, emit default and any buffered text
+        if not emotion_emitted:
+            yield {"type": "emotion", "emotion": self.default_emotion}
+            if prefix_buffer.strip():
+                yield {"type": "text", "data": self._remove_emojis(prefix_buffer)}
 
 
