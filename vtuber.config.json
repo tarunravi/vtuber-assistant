@@ -1,0 +1,48 @@
+{
+  "model": "ellot",
+  "models": {
+    "mao": {
+      "timeScale": 6,
+      "emotions": {
+        "Happy": "exp_01",
+        "Thinking": "exp_03",
+        "Excited": "exp_04",
+        "Sad": "exp_05",
+        "Concerned": "exp_05",
+        "Blushing": "exp_06",
+        "Embarassed": "exp_06",
+        "Shocked": "exp_07",
+        "Flustered": "exp_07",
+        "Annoyed": "exp_08",
+        "Mad": "exp_08"
+      }
+    },
+    "ellot": {
+      "timeScale": 4,
+      "emotions": {
+        "Searching": "exp_01",
+        "Concentrating": "exp_01",
+        "Gaming": "exp_01",
+        "Sad": "exp_02",
+        "Happy": "exp_03",
+        "Excited": "exp_04",
+        "Nerd": "exp_05",
+        "Cunning": "exp_06",
+        "Lying": "exp_06",
+        "Evil": "exp_06",
+        "Scheming": "exp_06",
+        "Blushing": "exp_08",
+        "Embarassed": "exp_08",
+        "Mad": "exp_09",
+        "Annoyed": "exp_09"
+      }
+    }
+  },
+  "llm": {
+    "provider": "ollama",
+    "model": "qwen2.5",
+    "host": "http://127.0.0.1:11434",
+    "wsPath": "/ws"
+  }
+}
+
