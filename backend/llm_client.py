@@ -72,7 +72,13 @@ class LLMClient:
                     if data.get("done") is True:
                         break
 
-    async def stream(self, user_text: str) -> AsyncGenerator[Dict[str, Any], None]:
+    async def stream(
+        self,
+        user_text: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        max_turns: int = 8,
+        max_chars: int = 4000,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream events from the LLM while parsing the leading [Emotion] tag.
 
@@ -80,7 +86,12 @@ class LLMClient:
         - {"type": "emotion", "emotion": str}
         - {"type": "text", "data": str}
         """
-        final_prompt = self.prompt_factory.build_final_prompt(user_text)
+        final_prompt = self.prompt_factory.build_final_prompt(
+            user_text,
+            history=history,
+            max_turns=max_turns,
+            max_chars=max_chars,
+        )
 
         if self.provider != "ollama":
             raise RuntimeError(f"Unsupported provider: {self.provider}")

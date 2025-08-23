@@ -107,6 +107,14 @@ async def ws_chat(websocket: WebSocket):
         prompt_factory=prompt_factory,
     )
 
+    # Maintain per-connection conversation history
+    # Each item: {"role": "user"|"assistant", "content": str}
+    history = []
+
+    # Memory controls (env overrides for quick tuning)
+    max_turns = int(os.getenv("LLM_MEMORY_TURNS", "8"))
+    max_chars = int(os.getenv("LLM_MEMORY_CHARS", "4000"))
+
     async with httpx.AsyncClient() as client:
         try:
             while True:
@@ -124,7 +132,17 @@ async def ws_chat(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "start"}))
 
                 if provider == "ollama":
-                    async for event in llm.stream(user_text):
+                    # Append user turn to history
+                    history.append({"role": "user", "content": user_text})
+                    # Buffer assistant text to store after stream completes
+                    assistant_accum = []
+
+                    async for event in llm.stream(
+                        user_text,
+                        history=history,
+                        max_turns=max_turns,
+                        max_chars=max_chars,
+                    ):
                         try:
                             if isinstance(event, dict):
                                 et = event.get("type")
@@ -133,13 +151,16 @@ async def ws_chat(websocket: WebSocket):
                                 elif et == "text":
                                     data = event.get("data")
                                     if data:
+                                        assistant_accum.append(data)
                                         await websocket.send_text(json.dumps({"type": "chunk", "data": data}))
                                 else:
                                     # Fallback: treat unknown dict as chunk
                                     await websocket.send_text(json.dumps({"type": "chunk", "data": json.dumps(event)}))
                             else:
                                 # Backward-compatible: raw text
-                                await websocket.send_text(json.dumps({"type": "chunk", "data": str(event)}))
+                                text_event = str(event)
+                                assistant_accum.append(text_event)
+                                await websocket.send_text(json.dumps({"type": "chunk", "data": text_event}))
                         except Exception:
                             # Do not break the stream on send errors; try to continue
                             pass
@@ -147,6 +168,14 @@ async def ws_chat(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"type": "error", "message": f"Unsupported provider: {provider}"}))
 
                 await websocket.send_text(json.dumps({"type": "end"}))
+                # Store assistant message in history
+                try:
+                    if 'assistant_accum' in locals():
+                        assistant_text = "".join(assistant_accum)
+                        if assistant_text.strip():
+                            history.append({"role": "assistant", "content": assistant_text})
+                except Exception:
+                    pass
         except WebSocketDisconnect:
             return
         except Exception as e:

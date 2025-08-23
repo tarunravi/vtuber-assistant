@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional, Dict
 
 
 class PromptFactory:
@@ -37,8 +37,69 @@ class PromptFactory:
         )
         return "\n".join(p.strip() for p in parts if p and p.strip())
 
-    def build_final_prompt(self, user_text: str) -> str:
+    def _format_history(
+        self,
+        history: Optional[List[Dict[str, str]]],
+        max_turns: int,
+        max_chars: int,
+    ) -> str:
+        if not history:
+            return ""
+
+        # Keep only the last N user/assistant pairs
+        # History items are expected as dicts: {"role": "user"|"assistant", "content": str}
+        # Normalize to pairs while preserving order
+        pairs: List[List[str]] = []
+        current_pair: List[str] = []
+        for item in history:
+            role = (item.get("role") or "").strip().lower()
+            content = (item.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "user":
+                # Start a new pair
+                if current_pair:
+                    pairs.append(current_pair)
+                current_pair = [f"User: {content}"]
+            elif role == "assistant":
+                if not current_pair:
+                    # If assistant comes first, start with empty user context
+                    current_pair = ["User: "]
+                current_pair.append(f"Assistant: {content}")
+                pairs.append(current_pair)
+                current_pair = []
+        if current_pair:
+            pairs.append(current_pair)
+
+        # Only last max_turns pairs
+        if max_turns > 0:
+            pairs = pairs[-max_turns:]
+
+        lines: List[str] = []
+        for pair in pairs:
+            lines.extend(pair)
+
+        history_text = "\n".join(lines)
+        if max_chars > 0 and len(history_text) > max_chars:
+            # Truncate from the start to keep recent context
+            history_text = history_text[-max_chars:]
+        return history_text
+
+    def build_final_prompt(
+        self,
+        user_text: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        max_turns: int = 8,
+        max_chars: int = 4000,
+    ) -> str:
         system = self.build_system_prompt()
-        return f"{system}\n\nUser: {user_text or ''}\nAssistant:"
+        history_block = self._format_history(history, max_turns=max_turns, max_chars=max_chars)
+        parts: List[str] = [system]
+        if history_block:
+            parts.append("Conversation so far:")
+            parts.append(history_block)
+        parts.append(f"User: {user_text or ''}")
+        parts.append("Assistant:")
+        return "\n\n".join(parts)
 
 

@@ -20,8 +20,11 @@ This app adds a lightweight LLM chat on top of the Live2D renderer. The architec
 ### Data Flow
 1. Frontend loads `app-config.json` to read `llm.backendWsUrl`.
 2. `ChatPanel` connects to the WebSocket and sends `{ "prompt": string }`.
-3. Backend calls Ollama `/api/generate` with `stream: true` and forwards each token to the client.
-4. Frontend appends streamed chunks to the last assistant message until an `end` event is received.
+3. Backend appends the user message to per-connection conversation history.
+4. Backend calls Ollama `/api/generate` with `stream: true`, including recent conversation context in the prompt.
+5. Backend forwards each token to the client as streaming chunks.
+6. Frontend appends streamed chunks to the last assistant message until an `end` event is received.
+7. Backend stores the complete assistant response in conversation history for future context.
 
 ### WebSocket Protocol
 - Client → Server: raw text or `{ "prompt": string }`.
@@ -30,6 +33,34 @@ This app adds a lightweight LLM chat on top of the Live2D renderer. The architec
   - `{ "type": "chunk", "data": string }` repeated
   - `{ "type": "end" }` when complete
   - On failure: `{ "type": "error", "message": string }`
+
+### Conversation Memory
+The system maintains per-connection conversation history to provide context for more coherent and contextual responses:
+
+**Memory Structure:**
+- Each WebSocket connection maintains a `history` list of message objects
+- Format: `{"role": "user"|"assistant", "content": "message text"}`
+- History is included in LLM prompts to maintain conversation continuity
+
+**Memory Limits:**
+- **Turn Limit**: Maximum number of user/assistant pairs to remember (default: 8)
+- **Character Limit**: Maximum total characters in history (default: 4000)
+- Both limits can be configured via environment variables:
+  - `LLM_MEMORY_TURNS`: Number of conversation turns to remember
+  - `LLM_MEMORY_CHARS`: Maximum characters in conversation history
+
+**Memory Flow:**
+1. User message is appended to history before LLM call
+2. LLM receives system prompt + conversation history + current user message
+3. Assistant response is buffered during streaming
+4. Complete assistant response is stored in history after streaming completes
+5. History is automatically truncated to respect configured limits
+
+**Benefits:**
+- Maintains conversation context across multiple turns
+- Allows for follow-up questions and references to previous messages
+- Provides more coherent and contextual responses
+- Memory is per-connection, so different browser sessions don't interfere
 
 ### Configuration
 - Root config: `vtuber/vtuber.config.json`
@@ -57,6 +88,7 @@ This app adds a lightweight LLM chat on top of the Live2D renderer. The architec
 - Backend dynamically registers the WebSocket route using `wsPath` from the root config.
 - Streaming is implemented by forwarding each JSON line from Ollama to the client as a `chunk`.
 - The frontend maintains a conversation list and live-updates the most recent assistant message with incoming chunks.
+- **Conversation Memory**: Each WebSocket connection maintains per-session conversation history to provide context for LLM responses.
 
 ### Running Locally
 - Single command from repo root:
@@ -70,6 +102,7 @@ This app adds a lightweight LLM chat on top of the Live2D renderer. The architec
 ### Extensibility
 - To change the LLM: update `llm.model` or `llm.host` in `vtuber.config.json`.
 - To change WebSocket path: update `llm.wsPath` and restart. The frontend picks up the new URL via `app-config.json` on next dev run.
+- To adjust memory limits: set environment variables `LLM_MEMORY_TURNS` (default: 8) and `LLM_MEMORY_CHARS` (default: 4000) before starting the backend.
 
 ### References (code excerpts)
 ```1:40:vtuber/backend/server.py
@@ -90,6 +123,31 @@ async def stream_ollama(client: httpx.AsyncClient, host: str, model: str, prompt
             # parse JSONL and yield tokens
             # ...
             pass
+```
+
+**Conversation Memory Implementation:**
+```python
+# vtuber/backend/server.py - WebSocket handler
+async def ws_chat(websocket: WebSocket):
+    # Maintain per-connection conversation history
+    history = []
+    max_turns = int(os.getenv("LLM_MEMORY_TURNS", "8"))
+    max_chars = int(os.getenv("LLM_MEMORY_CHARS", "4000"))
+    
+    # Append user turn, call LLM with history, store assistant response
+    history.append({"role": "user", "content": user_text})
+    async for event in llm.stream(user_text, history=history, max_turns=max_turns, max_chars=max_chars):
+        # ... streaming logic ...
+    history.append({"role": "assistant", "content": assistant_text})
+```
+
+```python
+# vtuber/backend/prompt_factory.py - History formatting
+def build_final_prompt(self, user_text: str, history=None, max_turns=8, max_chars=4000):
+    system = self.build_system_prompt()
+    history_block = self._format_history(history, max_turns, max_chars)
+    # Include conversation context before current user message
+    return f"{system}\n\nConversation so far:\n{history_block}\n\nUser: {user_text}\nAssistant:"
 ```
 
 ```1:60:vtuber/frontend/src/components/ChatPanel.tsx

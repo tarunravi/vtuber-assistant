@@ -49,7 +49,10 @@ Given the selected `prompt` and `model`, the factory:
    - Forbids emojis or special characters; plain English only.
    - Emphasizes concise, directly-on-topic answers.
    - Keeps persona implicit on simple messages (e.g., saying “hi”), surfacing personality subtly only when appropriate.
-4) Composes the final single-field prompt for streaming to the LLM.
+4) Composes the final prompt by combining:
+   - System instructions
+   - Recent conversation history (if provided)
+   - Current user message
 
 Code (simplified):
 ```python
@@ -77,16 +80,30 @@ class PromptFactory:
         )
         return "\n".join(p.strip() for p in parts if p and p.strip())
 
-    def build_final_prompt(self, user_text: str) -> str:
+    def build_final_prompt(
+        self,
+        user_text: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        max_turns: int = 8,
+        max_chars: int = 4000,
+    ) -> str:
         system = self.build_system_prompt()
-        return f"{system}\n\nUser: {user_text or ''}\nAssistant:"
+        history_block = self._format_history(history, max_turns, max_chars)
+        parts: List[str] = [system]
+        if history_block:
+            parts.append("Conversation so far:")
+            parts.append(history_block)
+        parts.append(f"User: {user_text or ''}")
+        parts.append("Assistant:")
+        return "\n\n".join(parts)
 ```
 
 ### How the server uses it
 - On each WebSocket message, the backend loads config once at startup and constructs a `PromptFactory` with:
   - `persona_prompt`: from `prompts[prompt]`
   - `emotion_names`: from `models[model].emotions` keys
-- It then calls `build_final_prompt(user_text)` and streams the result to the LLM (Ollama).
+- It then calls `build_final_prompt(user_text, history, max_turns, max_chars)` with conversation history and streams the result to the LLM (Ollama).
+- The conversation history is maintained per-connection and automatically truncated to respect memory limits.
 
 Key lines (trimmed):
 ```python
@@ -104,12 +121,46 @@ final_prompt = prompt_factory.build_final_prompt(user_text)
 - **Dynamic**: Emotions come from the currently selected model; no hardcoding.
 - **Separation of concerns**: Persona and style live in one place; server code stays small.
 - **Implicit persona**: Friendly style without forced self-introductions.
+- **Conversation memory**: Maintains context across multiple turns for more coherent responses.
 
 ### Switching persona or model
 - Change `prompt` to `prompt1`/`prompt2` in `vtuber/vtuber.config.json` to switch personas.
 - Change `model` to switch character; the allowed emotion tags update automatically.
 
+### Conversation Memory
+The PromptFactory now supports conversation history to provide context for more coherent responses:
+
+**History Format:**
+- History is passed as a list of dictionaries: `{"role": "user"|"assistant", "content": "message"}`
+- The factory formats this into a readable conversation block
+- History is included before the current user message in the final prompt
+
+**Memory Controls:**
+- `max_turns`: Maximum number of user/assistant pairs to include (default: 8)
+- `max_chars`: Maximum total characters in the history section (default: 4000)
+- Both limits help prevent prompts from becoming too long while maintaining context
+
+**Example Prompt Structure:**
+```
+[System instructions with persona and emotions]
+
+Conversation so far:
+User: Hello, how are you?
+Assistant: [Happy] I'm doing great! How about you?
+User: What's your favorite game?
+
+User: What's your favorite game?
+Assistant:
+```
+
+**Benefits:**
+- Maintains conversation continuity across multiple turns
+- Allows the LLM to reference previous messages and maintain context
+- Provides more coherent and contextual responses
+- Memory limits prevent prompts from becoming unwieldy
+
 ### Notes
 - No frontend changes are required. The emotion tag at the start of each assistant message can be used by the UI if desired.
+- Conversation memory is maintained per-WebSocket connection in the server, not in the PromptFactory itself.
 
 
