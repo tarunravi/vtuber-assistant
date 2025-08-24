@@ -9,7 +9,50 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 from prompt_factory import PromptFactory
-from llm_client import LLMClient
+from chat_streamer import ChatStreamer
+from llm_transport import LLMTransport
+from typing import List
+
+async def classify_emotion_llm(
+    client: httpx.AsyncClient,
+    host: str,
+    model: str,
+    last_user: str,
+    assistant: str,
+    allowed: List[str],
+) -> str:
+    """Call the LLM to choose exactly one emotion from the allowed list.
+
+    The model must return only the emotion word, nothing else.
+    """
+    allowed_clean = [e for e in (allowed or []) if isinstance(e, str) and e.strip()]
+    allowed_line = ", ".join(allowed_clean) if allowed_clean else "Happy, Sad, Excited, Thinking, Annoyed"
+    prompt = (
+        "You are an emotion selector for a VTuber.\n"
+        "Given the user's message and the assistant's reply, pick exactly one emotion from the allowed list that best matches the assistant's tone.\n"
+        f"Allowed emotions (choose exactly one, return only the word): {allowed_line}.\n\n"
+        f"User: {last_user or ''}\n"
+        f"Assistant: {assistant or ''}\n\n"
+        "Answer with only the emotion word (must be exactly as listed in Allowed)."
+    )
+
+    # Use core LLM for logging and generation
+    core = LLMTransport(host, model, "ollama")
+    text = await core.generate(prompt)
+    # Keep ASCII letters and spaces only
+    text = re.sub(r"[^A-Za-z\s]", " ", text).strip()
+    # Try exact match first
+    allowed_map = {e.lower(): e for e in allowed_clean}
+    parts = [p for p in text.split() if p]
+    for p in parts:
+        key = p.lower()
+        if key in allowed_map:
+            return allowed_map[key]
+    # Fallback: scan full text for any allowed word
+    for e in allowed_clean:
+        if re.search(rf"(?i)(?<![A-Za-z]){re.escape(e)}(?![A-Za-z])", text):
+            return e
+    return allowed_clean[0] if allowed_clean else "Neutral"
 
 
 # Resolve project root config regardless of CWD (works for local and Docker)
@@ -99,7 +142,7 @@ async def ws_chat(websocket: WebSocket):
     model = cfg["model"]
     host = cfg["host"]
     allowed_emotions = cfg.get("emotion_names", [])
-    llm = LLMClient(
+    llm = ChatStreamer(
         host=host,
         model=model,
         provider=provider,
@@ -146,9 +189,7 @@ async def ws_chat(websocket: WebSocket):
                         try:
                             if isinstance(event, dict):
                                 et = event.get("type")
-                                if et == "emotion":
-                                    await websocket.send_text(json.dumps({"type": "emotion", "emotion": event.get("emotion")}))
-                                elif et == "text":
+                                if et == "text":
                                     data = event.get("data")
                                     if data:
                                         assistant_accum.append(data)
@@ -166,6 +207,22 @@ async def ws_chat(websocket: WebSocket):
                             pass
                 else:
                     await websocket.send_text(json.dumps({"type": "error", "message": f"Unsupported provider: {provider}"}))
+
+                # Post-process: classify emotion from last user input + assistant response using LLM
+                try:
+                    assistant_text = "".join(assistant_accum)
+                    emotion = await classify_emotion_llm(
+                        client,
+                        host,
+                        model,
+                        last_user=user_text,
+                        assistant=assistant_text,
+                        allowed=allowed_emotions,
+                    )
+                    if emotion:
+                        await websocket.send_text(json.dumps({"type": "emotion", "emotion": emotion}))
+                except Exception:
+                    pass
 
                 await websocket.send_text(json.dumps({"type": "end"}))
                 # Store assistant message in history

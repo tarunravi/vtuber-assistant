@@ -3,10 +3,9 @@
 ### What it does
 The Prompt Factory composes the final instruction sent to the LLM by combining:
 - Persona prompt (from config `prompts[prompt]`)
-- Dynamic emotion instruction (valid emotions pulled from the selected Live2D model)
-- Style and response constraints (plain English, no emojis/special characters, concise answers)
+- Style and response constraints (plain English, concise answers, no emojis)
 
-This keeps persona and behavior centralized and consistent without hardcoding model-specific details.
+It keeps persona and behavior centralized and consistent without hardcoding model-specific details.
 
 ### Where it lives
 - Backend class: `vtuber/backend/prompt_factory.py`
@@ -15,7 +14,6 @@ This keeps persona and behavior centralized and consistent without hardcoding mo
 ### Related configuration
 - Root config: `vtuber/vtuber.config.json`
   - `model`: currently selected Live2D model (e.g., `ellot`, `mao`).
-  - `models[MODEL_NAME].emotions`: map of Emotion → expression id. The emotion names (keys) become the LLM’s allowed emotion tags.
   - `prompts`: dictionary of reusable persona prompts (e.g., `prompt1`, `prompt2`).
   - `prompt`: which persona key to use from `prompts`.
 
@@ -41,15 +39,13 @@ Example (trimmed):
 ```
 
 ### How it builds the prompt
-Given the selected `prompt` and `model`, the factory:
+Given the selected `prompt`, the factory:
 1) Reads the persona text from `prompts[prompt]`.
-2) Reads the emotion names from `models[model].emotions` keys.
-3) Produces a system instruction that:
-   - Requires responses to start with exactly one valid emotion tag: `[Emotion]`.
+2) Produces a system instruction that:
    - Forbids emojis or special characters; plain English only.
    - Emphasizes concise, directly-on-topic answers.
    - Keeps persona implicit on simple messages (e.g., saying “hi”), surfacing personality subtly only when appropriate.
-4) Composes the final prompt by combining:
+3) Composes the final prompt by combining:
    - System instructions
    - Recent conversation history (if provided)
    - Current user message
@@ -66,14 +62,8 @@ class PromptFactory:
         parts = []
         if self.persona_prompt:
             parts.append(self.persona_prompt)
-        if self.emotion_names:
-            emotions_line = ", ".join(self.emotion_names)
-            parts.append(
-                "In your response, always start with a single emotion tag in square brackets, "
-                f"exactly one of these: [{emotions_line}]. Pick the most relevant emotion for your answer."
-            )
         parts.append(
-            "Write only in plain English without emojis or special characters. "
+            "Write only in plain English. "
             "Keep responses very concise and directly answer the question. "
             "Do not introduce yourself or state your persona explicitly on simple messages; "
             "keep the personality implicit and subtle, surfacing naturally only when appropriate."
@@ -118,7 +108,6 @@ final_prompt = prompt_factory.build_final_prompt(user_text)
 ```
 
 ### Why this design
-- **Dynamic**: Emotions come from the currently selected model; no hardcoding.
 - **Separation of concerns**: Persona and style live in one place; server code stays small.
 - **Implicit persona**: Friendly style without forced self-introductions.
 - **Conversation memory**: Maintains context across multiple turns for more coherent responses.
@@ -160,7 +149,6 @@ Assistant:
 - Memory limits prevent prompts from becoming unwieldy
 
 ### Notes
-- No frontend changes are required. The emotion tag at the start of each assistant message can be used by the UI if desired.
 - Conversation memory is maintained per-WebSocket connection in the server, not in the PromptFactory itself.
 
 

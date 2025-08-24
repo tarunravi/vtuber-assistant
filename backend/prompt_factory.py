@@ -20,14 +20,7 @@ class PromptFactory:
         parts: List[str] = []
         if self.persona_prompt:
             parts.append(self.persona_prompt)
-        if self.emotion_names:
-            emotions_line = ", ".join(self.emotion_names)
-            parts.append(
-                "In your response, always start with a single emotion tag in square brackets, "
-                f"exactly one of these: [{emotions_line}]. Pick the most relevant emotion for your answer. "
-                "Try to use different emotions in subsequent message if suitable."
-                "Never use any other emotion names and do not invent new ones."
-            )
+        # No emotion-tag instruction. The assistant should reply in plain English, concise.
         parts.append(
             "Write only in plain English. "
             "Never use emojis or emoticons. "

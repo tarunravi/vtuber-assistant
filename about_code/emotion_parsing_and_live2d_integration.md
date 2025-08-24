@@ -1,57 +1,34 @@
 # Emotion Parsing and Live2D Integration
 
 ## Overview
-This document describes the emotion parsing system that automatically extracts emotion tags from LLM responses and drives Live2D model expressions. The system parses the leading `[Emotion]` tag from assistant messages, applies the corresponding expression to the avatar, and automatically resets to a default emotion after 5 seconds.
+This document describes how emotions are determined from conversation context and applied to Live2D expressions. The backend streams plain-English assistant text (no emotion tags). After streaming completes, the backend classifies the single best-matching emotion using the LLM and sends it to the frontend, which applies the corresponding expression and resets to a default after 5 seconds.
 
 ## Architecture
 
 ### Backend Changes
 
-#### LLM Client (`backend/llm_client.py`)
-The `LLMClient.stream()` method now yields structured events instead of raw text:
+#### Chat streaming
+- Class: `backend/chat_streamer.py` (`ChatStreamer`)
+- Emits streaming events: `{"type": "text", "data": string}` only.
+- Cleans tokens (no emojis, non-English stripping) and handles conversation history via `PromptFactory`.
 
-```python
-async def stream(self, user_text: str) -> AsyncGenerator[Dict[str, Any], None]:
-    """
-    Stream events from the LLM while parsing the leading [Emotion] tag.
-    
-    Yields structured events:
-    - {"type": "emotion", "emotion": str}
-    - {"type": "text", "data": str}
-    """
-```
-
-**Key Changes:**
-- Parses the first `[Emotion]` tag from the LLM response
-- Validates the emotion against allowed emotions from the model configuration
-- Falls back to default emotion (prefers "Happy") if the parsed emotion is invalid
-- Emits a single `emotion` event followed by `text` events containing only the message content
-- Removes the emotion tag from the displayed text
-
-**Event Flow:**
-1. **Emotion Event**: `{"type": "emotion", "emotion": "Happy"}` - emitted once per response
-2. **Text Events**: `{"type": "text", "data": "Hello there!"}` - repeated for each text chunk
+#### Emotion classification
+- After streaming completes, the server calls the LLM once more with a short instruction to select exactly one emotion from the allowed list.
+- File: `backend/server.py`, function `classify_emotion_llm(...)`.
+- Result is sent as a WebSocket event: `{"type": "emotion", "emotion": string}`.
 
 #### WebSocket Server (`backend/server.py`)
-The WebSocket handler now processes structured events from the LLM client:
+The WebSocket handler streams text chunks first, then sends a single emotion event based on the classifier:
 
 ```python
-async for event in llm.stream(user_text):
-    try:
-        if isinstance(event, dict):
-            et = event.get("type")
-            if et == "emotion":
-                await websocket.send_text(json.dumps({"type": "emotion", "emotion": event.get("emotion")}))
-            elif et == "text":
-                data = event.get("data")
-                if data:
-                    await websocket.send_text(json.dumps({"type": "chunk", "data": data}))
-```
+async for event in chat.stream(user_text, history=history, ...):
+    if isinstance(event, dict) and event.get("type") == "text":
+        await websocket.send_text(json.dumps({"type": "chunk", "data": event["data"]}))
 
-**Protocol Changes:**
-- New message type: `{"type": "emotion", "emotion": string}`
-- Existing `{"type": "chunk", "data": string}` now contains only the text content (no emotion tag)
-- Maintains backward compatibility with existing start/end/error message types
+# After stream
+emotion = await classify_emotion_llm(client, host, model, last_user=user_text, assistant=assistant_text, allowed=allowed_emotions)
+await websocket.send_text(json.dumps({"type": "emotion", "emotion": emotion}))
+```
 
 ### Frontend Changes
 
@@ -76,8 +53,7 @@ Enhanced to handle emotion events and maintain debug logging:
 **New Features:**
 - Listens for `{"type": "emotion"}` WebSocket messages
 - Dispatches `emotion` events to the event bus
-- Maintains a raw buffer that includes the emotion tag for debugging
-- Logs the complete raw assistant output (including emotion tag) to console on completion
+- Logs the complete assistant output on completion (raw text only)
 
 **Event Handling:**
 ```typescript
@@ -155,19 +131,17 @@ The component uses a three-tier fallback system to apply expressions:
 ### Complete Flow Example
 1. **User Input**: "How are you feeling today?"
 2. **Backend Processing**:
-   - LLM generates: `[Happy] I'm feeling great today! How about you?`
-   - `LLMClient.stream()` parses and emits:
-     - `{"type": "emotion", "emotion": "Happy"}`
-     - `{"type": "text", "data": "I'm feeling great today! How about you?"}`
+   - ChatStreamer streams plain English chunks: "I'm feeling great today! How about you?"
+   - After completion, the server asks the LLM to choose a single emotion from the allowed list, based on user+assistant text.
 3. **WebSocket Transmission**:
+   - `{"type": "chunk", "data": "I'm feeling great today! How about you?"}` (repeated)
    - `{"type": "emotion", "emotion": "Happy"}`
-   - `{"type": "chunk", "data": "I'm feeling great today! How about you?"}`
 4. **Frontend Processing**:
    - ChatPanel receives emotion event, dispatches to event bus
    - Live2D receives emotion event, applies "Happy" expression
    - ChatPanel displays only the text content (no emotion tag)
    - After 5 seconds, Live2D resets to default emotion
-5. **Debug Output**: Console shows `[Assistant raw] [Happy] I'm feeling great today! How about you?`
+5. **Debug Output**: Console shows the assistant text; emotion event arrives separately.
 
 ## Configuration
 

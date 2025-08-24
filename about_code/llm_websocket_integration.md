@@ -4,27 +4,32 @@
 This app adds a lightweight LLM chat on top of the Live2D renderer. The architecture follows a clear frontend/backend split and uses a WebSocket to stream tokens from a locally running Ollama instance to the browser.
 
 ### Components
-- **Backend (FastAPI WebSocket)**: `vtuber/backend/server.py`
-  - Exposes a WebSocket endpoint (path from config) that accepts a user prompt and streams LLM tokens back to the client.
-  - Talks to Ollama via its HTTP streaming API.
+- **Backend (FastAPI WebSocket)**: `backend/server.py`
+  - Exposes a WebSocket endpoint (path from config) that accepts a user prompt and streams assistant text back to the client.
+  - Uses `ChatStreamer` to build prompts and stream tokens, and `classify_emotion_llm` to classify emotion post-stream.
+
+- **Transport**: `backend/llm_transport.py`
+  - `LLMTransport` handles Ollama HTTP streaming.
+
+- **Chat orchestration**: `backend/chat_streamer.py`
+  - `ChatStreamer` composes prompts (via `PromptFactory`), cleans tokens, and emits text events.
 
 - **LLM Provider (Ollama)**
-  - Default model: `qwen2.5` (can be changed in config).
-  - Default host: `http://127.0.0.1:11434` (Ollama local server).
+  - Default model: `qwen2.5` (configurable).
+  - Default host: `http://127.0.0.1:11434` (configurable).
 
 - **Frontend (React)**
-  - Live2D renderer stays unchanged in `frontend/src/components/Live2D.tsx`.
-  - New chat UI `frontend/src/components/ChatPanel.tsx` opens a WebSocket to the backend and renders streamed output.
+  - Live2D renderer in `frontend/src/components/Live2D.tsx`.
+  - Chat UI `frontend/src/components/ChatPanel.tsx` opens a WebSocket and renders streamed output.
   - `frontend/scripts/sync-assets.mjs` generates `frontend/public/app-config.json`, including `llm.backendWsUrl`.
 
 ### Data Flow
 1. Frontend loads `app-config.json` to read `llm.backendWsUrl`.
 2. `ChatPanel` connects to the WebSocket and sends `{ "prompt": string }`.
 3. Backend appends the user message to per-connection conversation history.
-4. Backend calls Ollama `/api/generate` with `stream: true`, including recent conversation context in the prompt.
-5. Backend forwards each token to the client as streaming chunks.
-6. Frontend appends streamed chunks to the last assistant message until an `end` event is received.
-7. Backend stores the complete assistant response in conversation history for future context.
+4. Backend streams via `ChatStreamer` (Ollama `/api/generate` under the hood), forwarding clean text chunks.
+5. Frontend appends streamed chunks to the last assistant message until an `end` event is received.
+6. Backend stores the complete assistant response and then classifies a single emotion; sends it to the client.
 
 ### WebSocket Protocol
 - Client → Server: raw text or `{ "prompt": string }`.
@@ -105,7 +110,7 @@ The system maintains per-connection conversation history to provide context for 
 - To adjust memory limits: set environment variables `LLM_MEMORY_TURNS` (default: 8) and `LLM_MEMORY_CHARS` (default: 4000) before starting the backend.
 
 ### References (code excerpts)
-```1:40:vtuber/backend/server.py
+```1:40:backend/server.py
 import json
 from typing import AsyncGenerator
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -150,7 +155,7 @@ def build_final_prompt(self, user_text: str, history=None, max_turns=8, max_char
     return f"{system}\n\nConversation so far:\n{history_block}\n\nUser: {user_text}\nAssistant:"
 ```
 
-```1:60:vtuber/frontend/src/components/ChatPanel.tsx
+```1:60:frontend/src/components/ChatPanel.tsx
 export default function ChatPanel() {
   // loads backendWsUrl from /app-config.json
   // opens a WebSocket, sends { prompt }, and renders streaming chunks
