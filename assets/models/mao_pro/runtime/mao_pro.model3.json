@@ -40,6 +40,10 @@
 			{
 				"Name": "exp_08",
 				"File": "expressions/exp_08.exp3.json"
+			},
+			{
+				"Name": "exp_mouth_move",
+				"File": "expressions/exp_mouth_move.exp3.json"
 			}
 		],
 		"Motions": {

@@ -7,6 +7,7 @@ type StreamMessage =
   | { type: 'end' }
   | { type: 'error'; message: string }
   | { type: 'emotion'; emotion: string }
+  | { type: 'audio'; format?: 'mp3' | 'wav' | string; data: string }
 
 type ConversationItem = {
   role: 'user' | 'assistant'
@@ -62,6 +63,26 @@ export default function ChatPanel() {
           setStreaming(true)
           pendingAssistantRef.current = ''
           setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+          return
+        }
+        if (msg.type === 'audio') {
+          try {
+            if (msg.data) {
+              const mime = msg.format === 'wav' ? 'audio/wav' : 'audio/mpeg'
+              const audio = new Audio(`data:${mime};base64,${msg.data}`)
+              let durationMs = 0
+              audio.onloadedmetadata = () => {
+                if (Number.isFinite(audio.duration) && audio.duration > 0) {
+                  durationMs = Math.round(audio.duration * 1000)
+                }
+              }
+              audio.onplay = () => {
+                const detail = { label: 'Mouth Move', durationMs: durationMs > 0 ? durationMs : undefined }
+                appEvents.dispatchEvent(new CustomEvent('mouth', { detail }))
+              }
+              audio.play().catch(() => {})
+            }
+          } catch {}
           return
         }
         if (msg.type === 'emotion') {

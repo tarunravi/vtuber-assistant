@@ -11,6 +11,7 @@ export default function Live2D() {
   const [selectedExpression, setSelectedExpression] = useState<string>('')
   const [emotionOptions, setEmotionOptions] = useState<{ label: string; value: string }[]>([])
   const emotionResetTimerRef = useRef<number | null>(null)
+  const mouthTimerRef = useRef<number | null>(null)
   const defaultEmotionRef = useRef<string>('Happy')
   const emotionOptionsRef = useRef<{ label: string; value: string }[]>([])
   const pendingEmotionRef = useRef<string | null>(null)
@@ -219,6 +220,10 @@ export default function Live2D() {
         window.clearTimeout(emotionResetTimerRef.current)
         emotionResetTimerRef.current = null
       }
+      if (mouthTimerRef.current) {
+        window.clearTimeout(mouthTimerRef.current)
+        mouthTimerRef.current = null
+      }
     }
   }, [])
 
@@ -284,9 +289,26 @@ export default function Live2D() {
       }, 5000)
     }
 
+    const onMouth = async (evt: Event) => {
+      const detail = (evt as CustomEvent).detail as { label?: string; durationMs?: number } | undefined
+      const label = (detail?.label || 'Mouth Move').trim()
+      const durationMs = typeof detail?.durationMs === 'number' && detail!.durationMs! > 0 ? detail!.durationMs! : 3000
+      if (!spriteRef.current) return
+
+      await applyExpressionByLabel(label)
+
+      if (mouthTimerRef.current) window.clearTimeout(mouthTimerRef.current)
+      mouthTimerRef.current = window.setTimeout(async () => {
+        const defLabel = defaultEmotionRef.current
+        await applyExpressionByLabel(defLabel)
+      }, durationMs)
+    }
+
     appEvents.addEventListener('emotion', onEmotion as EventListener)
+    appEvents.addEventListener('mouth', onMouth as EventListener)
     return () => {
       appEvents.removeEventListener('emotion', onEmotion as EventListener)
+      appEvents.removeEventListener('mouth', onMouth as EventListener)
     }
   }, [])
 

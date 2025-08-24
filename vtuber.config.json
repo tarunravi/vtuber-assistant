@@ -4,7 +4,9 @@
   "models": {
     "mao": {
       "timeScale": 6,
+      "ttsVoice": "af_heart",
       "emotions": {
+        "Mouth Move": "exp_mouth_move",
         "Happy": "exp_01",
         "Thinking": "exp_03",
         "Excited": "exp_04",
@@ -20,7 +22,9 @@
     },
     "ellot": {
       "timeScale": 4,
+      "ttsVoice": "af_heart",
       "emotions": {
+        "Mouth Move": "exp_mouth_move",
         "Searching": "exp_01",
         "Concentrating": "exp_01",
         "Gaming": "exp_01",

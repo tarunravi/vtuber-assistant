@@ -3,6 +3,7 @@ from typing import AsyncGenerator
 import os
 from pathlib import Path
 import re
+import base64
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -81,13 +82,27 @@ def load_llm_config():
     models_cfg = cfg.get("models", {}) or {}
     persona_prompt = (prompts.get(selected_prompt_key) or "").strip()
     emotion_names = []
+    tts_voice = None
     try:
         model_entry = models_cfg.get(selected_model_key) or {}
         emotions_map = model_entry.get("emotions", {}) or {}
         # Keep the order as defined in JSON keys iteration (Python 3.7+ preserves insertion order)
         emotion_names = [name for name in emotions_map.keys() if isinstance(name, str) and name.strip()]
+        tv = model_entry.get("ttsVoice")
+        if isinstance(tv, str) and tv.strip():
+            tts_voice = tv.strip()
     except Exception:
         emotion_names = []
+        tts_voice = None
+
+    # TTS settings with env overrides
+    tts_host = os.getenv("TTS_HOST", "https://tts.tarunravi.com").rstrip("/")
+    tts_model = os.getenv("TTS_MODEL", "kokoro")
+    try:
+        tts_speed = float(os.getenv("TTS_SPEED", "1"))
+    except Exception:
+        tts_speed = 1.0
+    tts_lang = os.getenv("TTS_LANG_CODE", "en-US")
 
     return {
         "provider": provider,
@@ -96,6 +111,11 @@ def load_llm_config():
         "ws_path": ws_path,
         "persona_prompt": persona_prompt,
         "emotion_names": emotion_names,
+        "tts_voice": tts_voice or "af_heart",
+        "tts_host": tts_host,
+        "tts_model": tts_model,
+        "tts_speed": tts_speed,
+        "tts_lang": tts_lang,
     }
 
 
@@ -135,6 +155,37 @@ CFG = load_llm_config()
 WS_PATH = CFG["ws_path"] if CFG.get("ws_path") else "/ws"
 prompt_factory = PromptFactory(CFG.get("persona_prompt", ""), CFG.get("emotion_names", []))
 
+async def synthesize_tts(
+    client: httpx.AsyncClient,
+    *,
+    host: str,
+    model: str,
+    text: str,
+    voice: str,
+    response_format: str = "mp3",
+    speed: float = 1.0,
+    lang_code: str = "en-US",
+) -> bytes:
+    """Call external TTS service to synthesize speech. Returns raw audio bytes.
+
+    Endpoint expects JSON and returns audio bytes directly.
+    """
+    if not text or not text.strip():
+        return b""
+    url = f"{host}/v1/audio/speech"
+    payload = {
+        "model": model,
+        "input": text,
+        "voice": voice,
+        "response_format": response_format,
+        "speed": speed,
+        "lang_code": lang_code,
+    }
+    headers = {"Content-Type": "application/json"}
+    resp = await client.post(url, json=payload, headers=headers, timeout=None)
+    resp.raise_for_status()
+    return resp.content or b""
+
 async def ws_chat(websocket: WebSocket):
     await websocket.accept()
     cfg = CFG
@@ -142,6 +193,11 @@ async def ws_chat(websocket: WebSocket):
     model = cfg["model"]
     host = cfg["host"]
     allowed_emotions = cfg.get("emotion_names", [])
+    tts_voice = cfg.get("tts_voice") or "af_heart"
+    tts_host = cfg.get("tts_host") or "https://tts.tarunravi.com"
+    tts_model = cfg.get("tts_model") or "kokoro"
+    tts_speed = cfg.get("tts_speed") or 1.0
+    tts_lang = cfg.get("tts_lang") or "en-US"
     llm = ChatStreamer(
         host=host,
         model=model,
@@ -192,16 +248,16 @@ async def ws_chat(websocket: WebSocket):
                                 if et == "text":
                                     data = event.get("data")
                                     if data:
+                                        # Buffer text for TTS sync; do not stream to frontend yet
                                         assistant_accum.append(data)
-                                        await websocket.send_text(json.dumps({"type": "chunk", "data": data}))
                                 else:
                                     # Fallback: treat unknown dict as chunk
-                                    await websocket.send_text(json.dumps({"type": "chunk", "data": json.dumps(event)}))
+                                    # In sync mode, we also buffer unknown dicts as text
+                                    assistant_accum.append(json.dumps(event))
                             else:
                                 # Backward-compatible: raw text
                                 text_event = str(event)
                                 assistant_accum.append(text_event)
-                                await websocket.send_text(json.dumps({"type": "chunk", "data": text_event}))
                         except Exception:
                             # Do not break the stream on send errors; try to continue
                             pass
@@ -222,6 +278,37 @@ async def ws_chat(websocket: WebSocket):
                     if emotion:
                         await websocket.send_text(json.dumps({"type": "emotion", "emotion": emotion}))
                 except Exception:
+                    pass
+
+                # Synthesize TTS audio for the assistant's response and send as base64
+                try:
+                    if assistant_accum:
+                        assistant_text = "".join(assistant_accum).strip()
+                        if assistant_text:
+                            audio_bytes = await synthesize_tts(
+                                client,
+                                host=tts_host,
+                                model=tts_model,
+                                text=assistant_text,
+                                voice=tts_voice,
+                                response_format="mp3",
+                                speed=tts_speed,
+                                lang_code=tts_lang,
+                            )
+                            if audio_bytes:
+                                b64 = base64.b64encode(audio_bytes).decode("ascii")
+                                await websocket.send_text(json.dumps({
+                                    "type": "audio",
+                                    "format": "mp3",
+                                    "data": b64,
+                                }))
+                            # After audio is ready, deliver the full text so UI shows synchronized with playback
+                            await websocket.send_text(json.dumps({
+                                "type": "chunk",
+                                "data": assistant_text,
+                            }))
+                except Exception:
+                    # Don't fail the chat on TTS errors
                     pass
 
                 await websocket.send_text(json.dumps({"type": "end"}))
