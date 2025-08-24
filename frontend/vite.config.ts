@@ -9,6 +9,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    allowedHosts: ['vtuber.tarunravi.com', 'localhost', '127.0.0.1'],
     proxy: {
       // Proxy app websocket traffic to the backend inside the container
       '/ws': {
